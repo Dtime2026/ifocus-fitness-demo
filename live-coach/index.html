@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>iFocus Fitness · Live coach preview</title>
+<meta name="robots" content="noindex">
+<style>
+:root{--cyan:#36f1e0;--ink:#e9f7f6}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#05080d;color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden;-webkit-tap-highlight-color:transparent}
+canvas{position:fixed;inset:0;width:100vw;height:100vh;display:block;touch-action:manipulation}
+.top{position:fixed;top:0;left:0;right:0;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;pointer-events:none}
+.brand{font-weight:700;letter-spacing:.02em;font-size:15px}
+.brand b{color:var(--cyan)}
+.tag{font-size:11px;opacity:.65;margin-top:2px}
+.coaches{display:flex;gap:6px;pointer-events:auto}
+.chip{border:1px solid rgba(54,241,224,.35);background:rgba(10,20,26,.6);color:var(--ink);padding:6px 11px;border-radius:999px;font-size:13px;cursor:pointer}
+.chip.on{background:var(--cyan);color:#041014;border-color:var(--cyan);font-weight:600}
+.reps{position:fixed;top:70px;right:18px;text-align:right;pointer-events:none}
+.reps .ex{font-size:14px;letter-spacing:.12em;text-transform:uppercase;color:var(--cyan)}
+.reps .n{font-size:84px;font-weight:800;line-height:.95;text-shadow:0 0 24px rgba(54,241,224,.45)}
+.reps .of{font-size:16px;opacity:.7}
+.cue{position:fixed;left:50%;bottom:104px;transform:translateX(-50%);max-width:min(92vw,560px);background:rgba(6,14,18,.72);border:1px solid rgba(54,241,224,.3);padding:11px 16px;border-radius:14px;font-size:17px;text-align:center;backdrop-filter:blur(6px);transition:opacity .25s;pointer-events:none}
+.bar{position:fixed;left:0;right:0;bottom:0;padding:14px 12px calc(14px + env(safe-area-inset-bottom));display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.btn{background:rgba(12,24,30,.75);border:1px solid rgba(54,241,224,.4);color:var(--ink);padding:12px 16px;border-radius:12px;font-size:15px;font-weight:600;cursor:pointer;min-width:92px}
+.btn.on{background:var(--cyan);color:#041014}
+.btn.go{background:linear-gradient(90deg,#1fd6c5,#36f1e0);color:#041014;border:0}
+.start{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(ellipse at center,rgba(5,8,13,.35),rgba(5,8,13,.9));text-align:center;padding:24px;cursor:pointer;z-index:5}
+.start h1{margin:0;font-size:28px}
+.start p{margin:0;opacity:.8;max-width:420px}
+.start .btn{font-size:18px;padding:14px 26px}
+.load{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);font-size:14px;opacity:.75;z-index:6}
+.voice{pointer-events:auto}
+.tap{position:fixed;width:70px;height:70px;margin:-35px 0 0 -35px;border-radius:50%;border:3px solid #36f1e0;pointer-events:none;animation:tp .7s ease-out forwards;z-index:4}@keyframes tp{from{transform:scale(.3);opacity:1}to{transform:scale(1.6);opacity:0}}
+.hint{position:fixed;left:16px;top:70px;font-size:12px;opacity:.55;pointer-events:none}
+</style>
+</head>
+<body>
+<div class="top">
+  <div><div class="brand">i<b>Focus</b> Fitness · Live coach</div><div class="tag">Preview build, not the live app</div></div>
+  <div class="coaches" id="coaches"></div>
+</div>
+<div class="hint" id="hint">Tap your coach for a boost</div>
+<div class="reps" id="reps" style="opacity:0"><div class="ex" id="exName">Squat</div><div class="n" id="repN">0</div><div class="of" id="repOf">of 8</div></div>
+<div class="cue" id="cue" style="opacity:0"></div>
+<div class="bar" id="bar">
+  <button class="btn go" data-a="workout">Start workout</button>
+  <button class="btn" data-a="Squat">Squat</button>
+  <button class="btn" data-a="Curl">Curl</button>
+  <button class="btn" data-a="Pushup">Push-up</button>
+  <button class="btn voice" data-a="voice" id="voiceBtn">Voice on</button>
+</div>
+<div class="start" id="start"><h1 id="startTitle">Train with Avery</h1><p>Squats, curls and push-ups with live rep counts and spoken cues. Tap the coach any time for a boost.</p><button class="btn go">Tap to start</button></div>
+<div class="load" id="load">Loading coach…</div>
+<script type="importmap">{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/addons/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {MeshoptDecoder} from 'three/addons/libs/meshopt_decoder.module.js';
+import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
+
+const Q=new URLSearchParams(location.search);
+const COACHES={avery:'Avery',ellis:'Ellis',maren:'Maren',ione:'Ione'};
+const EX={
+  Squat:{label:'Squat',reps:8,speed:0.85,marks:[0.85],cues:['Chest up, sit back into your heels','Knees out over your toes','Drive up through the floor','Lovely depth, keep it smooth'],cam:{az:0.45,el:1.0,dist:4.3,look:0.8}},
+  Curl:{label:'Bicep curl',reps:8,speed:1.0,marks:[0.45,0.9],cues:['Elbows pinned to your sides','Squeeze at the top','Slow on the way down','No swinging, just biceps'],cam:{az:0.35,el:1.1,dist:4.0,look:0.95}},
+  Pushup:{label:'Push-up',reps:8,speed:0.7,marks:[0.85],cues:['Hands under your shoulders','Body in one straight line','Chest to the floor, then press','Brace your core'],cam:{az:0.95,el:1.5,dist:4.4,look:0.25}},
+};
+const BOOST=['You have got this!','Nice one, keep it going!','Strong work, stay with me!','That is it, perfect form!','Breathe, and push!'];
+let coach=(Q.get('coach')||'avery').toLowerCase(); if(!COACHES[coach]) coach='avery';
+let voiceOn=true;
+let simT=0; const jobs=[]; const later=(fn,sec)=>jobs.push({t:simT+sec,fn});
+function runJobs(){for(let i=jobs.length-1;i>=0;i--) if(jobs[i].t<=simT){const j=jobs.splice(i,1)[0]; j.fn();}}
+
+const r=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:Q.has('rec')});
+r.setPixelRatio(Math.min(devicePixelRatio,2)); r.setSize(innerWidth,innerHeight);
+r.toneMapping=THREE.ACESFilmicToneMapping; r.toneMappingExposure=1.05; r.shadowMap.enabled=true; r.shadowMap.type=THREE.PCFSoftShadowMap;
+document.body.prepend(r.domElement);
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x070b11); scene.fog=new THREE.Fog(0x070b11,8,18);
+const pm=new THREE.PMREMGenerator(r); scene.environment=pm.fromScene(new RoomEnvironment(),0.04).texture; scene.environmentIntensity=0.55;
+const key=new THREE.DirectionalLight(0xffffff,2.2); key.position.set(2,4,3); key.castShadow=true; key.shadow.mapSize.set(1024,1024);
+Object.assign(key.shadow.camera,{left:-2,right:2,top:2.5,bottom:-1,near:0.5,far:12}); scene.add(key);
+const rim=new THREE.DirectionalLight(0x36f1e0,1.6); rim.position.set(-3,2.5,-3); scene.add(rim);
+scene.add(new THREE.HemisphereLight(0x9fdcff,0x101418,0.35));
+// floor
+const floor=new THREE.Mesh(new THREE.CircleGeometry(6,64),new THREE.MeshStandardMaterial({color:0x0c1219,roughness:0.85,metalness:0.1}));
+floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
+const ring=new THREE.Mesh(new THREE.RingGeometry(0.95,1.0,96),new THREE.MeshBasicMaterial({color:0x36f1e0,transparent:true,opacity:0.5}));
+ring.rotation.x=-Math.PI/2; ring.position.y=0.002; scene.add(ring);
+const pulse=new THREE.Mesh(new THREE.RingGeometry(0.9,1.0,96),new THREE.MeshBasicMaterial({color:0x36f1e0,transparent:true,opacity:0}));
+pulse.rotation.x=-Math.PI/2; pulse.position.y=0.003; scene.add(pulse);
+const cam=new THREE.PerspectiveCamera(32,innerWidth/innerHeight,0.05,60);
+const camT={az:0.3,el:1.0,dist:4.4,look:0.85}; const camC={...camT}; const focus=new THREE.Vector3(); const _h=new THREE.Vector3();
+function fitDist(d){ // keep full body in frame on portrait screens
+  const a=innerWidth/innerHeight; return a<0.75? d*Math.min(1.9,0.75/a*1.05):d; }
+
+const loader=new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+const load=u=>new Promise((res,rej)=>loader.load(u,res,undefined,rej));
+let C=null; // current coach rig
+const cache={};
+async function loadCoach(id){
+  if(cache[id]) return cache[id];
+  const g=await load(`../models/coaches/${id}.glb`);
+  const root=g.scene; let mesh=null; const bones={};
+  root.traverse(o=>{ if(o.isSkinnedMesh){mesh=o;o.castShadow=true;o.frustumCulled=false;}
+    if(o.isBone) bones[o.name.replace('mixamorig','')]=o; });
+  const names=['Idle','Squat','Curl','Pushup','Talk','JumpingJacks'];
+  const clips={}; await Promise.all(names.map(async n=>{const c=await load(`../models/coaches/clips/${id}/${n}.glb`); const a=c.animations[0]; a.name=n; clips[n]=a;}));
+  const mixer=new THREE.AnimationMixer(root); const actions={};
+  for(const n of names){const a=mixer.clipAction(clips[n]); a.setLoop(THREE.LoopRepeat,Infinity); actions[n]=a;}
+  const holder=new THREE.Group(); holder.add(root);
+  // floor reference bones
+  const low=['LeftToeBase','RightToeBase','LeftFoot','RightFoot','LeftHand','RightHand','Head','Hips','LeftLeg','RightLeg','LeftForeArm','RightForeArm'].map(n=>bones[n]).filter(Boolean);
+  const rig={id,root,holder,mesh,bones,mixer,actions,clips,low,base:null,cur:null,yoff:0};
+  // baseline: lowest bone height in Idle (feet at floor)
+  actions.Idle.play(); mixer.update(0.01); root.updateMatrixWorld(true); rig.base=minBoneY(rig); actions.Idle.stop();
+  cache[id]=rig; return rig;
+}
+const _v=new THREE.Vector3();
+function minBoneY(rig){let m=1e9; for(const b of rig.low){b.getWorldPosition(_v); if(_v.y<m)m=_v.y;} return m-rig.holder.position.y;}
+
+function play(n,fade=0.35){
+  const a=C.actions[n]; if(C.cur===n) return a;
+  const prev=C.cur?C.actions[C.cur]:null;
+  a.reset(); a.enabled=true; a.setEffectiveWeight(1); a.timeScale=EX[n]?.speed??1; a.play();
+  if(prev) prev.crossFadeTo(a,fade,false);
+  C.cur=n; return a;
+}
+
+// UI
+const $=id=>document.getElementById(id);
+const cueEl=$('cue'); let cueTimer=0;
+function cue(t,speak=true){cueEl.textContent=t;cueEl.style.opacity=1;const my=++cueTimer; later(()=>{if(my===cueTimer)cueEl.style.opacity=0;},3.2);
+  if(speak&&voiceOn&&'speechSynthesis' in window){try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(t);u.lang='en-GB';u.rate=1.02;
+    const v=speechSynthesis.getVoices().find(v=>/en-GB/i.test(v.lang)); if(v)u.voice=v; speechSynthesis.speak(u);}catch(e){}}}
+function setReps(ex,n,of){$('reps').style.opacity=ex?1:0; if(!ex)return; $('exName').textContent=EX[ex].label; $('repN').textContent=n; $('repOf').textContent='of '+of;}
+function setBtn(a){document.querySelectorAll('.bar .btn').forEach(b=>{if(b.dataset.a!=='voice'&&b.dataset.a!=='workout')b.classList.toggle('on',b.dataset.a===a)});}
+
+// session state
+let S={ex:null,reps:0,target:0,lastT:0,queue:[],rest:0,onDone:null};
+function startSet(ex,target=EX[ex].reps){
+  S.ex=ex;S.reps=0;S.target=target;S.lastT=0;S.rest=0;
+  const a=play(ex); a.time=0; Object.assign(camT,EX[ex].cam); camT.dist=fitDist(EX[ex].cam.dist);
+  setReps(ex,0,target); setBtn(ex); cue(`${EX[ex].label}. ${target} reps. ${EX[ex].cues[0]}.`);
+  window.__state={ex,reps:0};
+}
+function idle(msg){S.ex=null; play('Idle'); setReps(null); setBtn(null); Object.assign(camT,{az:0.3,el:1.0,look:0.85,dist:fitDist(4.4)}); if(msg)cue(msg);}
+function workout(){S.wk=true;S.queue=['Squat','Curl','Pushup'].map(e=>({e,n:Q.has('rec')?5:EX[e].reps})); nextInQueue();}
+function nextInQueue(){const q=S.queue.shift(); if(!q){S.ex=null;play('Talk');setReps(null);setBtn(null);Object.assign(camT,{az:0.2,el:1.2,look:1.1,dist:fitDist(3.6)});cue(`Workout complete. Brilliant session, see you tomorrow!`);later(()=>{if(!S.ex)idle();},6);return;}
+  startSet(q.e,q.n);}
+function onRep(){
+  S.reps++; setReps(S.ex,S.reps,S.target); window.__state={ex:S.ex,reps:S.reps};
+  const left=S.target-S.reps; const ex=EX[S.ex];
+  if(left===0){ const done=S.ex; S.ex=null; play('Idle'); setBtn(null);
+    if(S.queue.length){cue(`${S.reps}! ${ex.label}s done. Next up, ${EX[S.queue[0].e].label.toLowerCase()}s.`); later(nextInQueue,2.6);} 
+    else if(S.wk){S.wk=false; cue(`${S.reps}! Workout complete. Brilliant session, see you tomorrow!`); later(()=>{if(!S.ex){setReps(null);play('Talk');}},2.5); later(()=>{if(!S.ex&&C.cur==='Talk')play('Idle');},9);}
+    else {cue(`${S.reps}! Set complete. Great work.`); later(()=>{if(!S.ex){setReps(null);}},2.5);} return; }
+  if(left===3) cue(`${S.reps}. Three more!`); else if(left===1) cue(`${S.reps}. Last one, make it count!`);
+  else if(S.reps%2===0) cue(`${S.reps}. ${ex.cues[(S.reps/2)%ex.cues.length]}`); else cue(String(S.reps));
+}
+
+// tap response
+const ray=new THREE.Raycaster(); const ndc=new THREE.Vector2(); let flash=0;
+r.domElement.addEventListener('pointerdown',e=>{ if(!C)return;
+  const d=document.createElement('div');d.className='tap';d.style.left=e.clientX+'px';d.style.top=e.clientY+'px';document.body.appendChild(d);setTimeout(()=>d.remove(),800);
+  ndc.set(e.clientX/innerWidth*2-1,-(e.clientY/innerHeight)*2+1); ray.setFromCamera(ndc,cam);
+  const box=new THREE.Box3().setFromObject(C.holder,true).expandByScalar(0.1);
+  if(ray.ray.intersectsBox(box)) boost();
+});
+function boost(){ flash=1; cue(BOOST[Math.floor(Math.random()*BOOST.length)]);
+  if(!S.ex){ play('JumpingJacks',0.25); later(()=>{if(!S.ex&&C.cur==='JumpingJacks')play('Idle');},2.3);} window.__boosts=(window.__boosts||0)+1; }
+window.boost=boost;
+
+document.getElementById('bar').addEventListener('click',e=>{const b=e.target.closest('.btn'); if(!b)return; const a=b.dataset.a;
+  if(a==='voice'){voiceOn=!voiceOn;b.textContent=voiceOn?'Voice on':'Voice off'; if(!voiceOn)speechSynthesis?.cancel(); return;}
+  S.queue=[];S.wk=false; if(a==='workout') workout(); else startSet(a);});
+
+async function switchCoach(id){
+  coach=id; renderChips(); $('load').style.display='block';
+  const rig=await loadCoach(id); if(C) scene.remove(C.holder); C=rig; scene.add(C.holder); C.cur=null;
+  for(const a of Object.values(C.actions)) a.stop();
+  $('load').style.display='none'; $('startTitle').textContent='Train with '+COACHES[id];
+  if(S.ex){const ex=S.ex,n=S.target-S.reps; startSet(ex,n>0?n:EX[ex].reps);} else play('Idle',0);
+  window.__ready=id;
+}
+function renderChips(){ $('coaches').innerHTML=Object.entries(COACHES).map(([k,v])=>`<button class="chip ${k===coach?'on':''}" data-c="${k}">${v}</button>`).join('');}
+$('coaches').addEventListener('click',e=>{const c=e.target.closest('.chip'); if(c&&c.dataset.c!==coach) switchCoach(c.dataset.c);});
+$('start').addEventListener('click',()=>{$('start').style.display='none'; cue(`Hi, I'm ${COACHES[coach]}, your iFocus coach. Let's warm up with some squats.`); later(()=>{if(!S.ex)workout();},3.5);});
+window.__start=()=>$('start').click();
+
+// loop
+const clock=new THREE.Clock();
+function tick(dt){
+  if(C){ C.mixer.update(dt); C.root.updateMatrixWorld(true);
+    // keep body on the floor (fixes clips with baked hips offset, e.g. push-up)
+    const target=C.base-minBoneY(C); C.yoff+= (target-C.yoff)*Math.min(1,dt*10); C.holder.position.y=C.yoff;
+    if(S.ex){ const a=C.actions[S.ex]; const t=a.time%a.getClip().duration;
+      const per=a.getClip().duration; const ph=t/per; // rep completes when clip wraps
+      for(const m of EX[S.ex].marks){ if((S.lastT<m && ph>=m) || (ph<S.lastT && m>S.lastT)) { onRep(); if(!S.ex) break; } }
+      S.lastT=ph; }
+  }
+  simT+=dt; runJobs();
+  for(const k of ['az','el','dist','look']) camC[k]+=(camT[k]-camC[k])*Math.min(1,dt*2.2);
+  if(C&&C.bones.Hips){C.bones.Hips.getWorldPosition(_h); _h.y=0; focus.lerp(_h,Math.min(1,dt*2.5));}
+  cam.position.set(focus.x+Math.sin(camC.az)*camC.dist,camC.el,focus.z+Math.cos(camC.az)*camC.dist); cam.lookAt(focus.x,camC.look,focus.z);
+  flash=Math.max(0,flash-dt*1.6); pulse.material.opacity=flash*0.9; const s=1+(1-flash)*1.2; pulse.scale.set(s,s,s);
+  ring.material.opacity=0.35+Math.sin(performance.now()/600)*0.12+flash*0.5;
+  r.render(scene,cam);
+}
+if(!Q.has('rec')) r.setAnimationLoop(()=>tick(Math.min(clock.getDelta(),0.05)));
+window.__tick=tick;
+addEventListener('resize',()=>{r.setSize(innerWidth,innerHeight);cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix(); camT.dist=fitDist(S.ex?EX[S.ex].cam.dist:4.4);});
+renderChips(); camT.dist=fitDist(4.4); Object.assign(camC,camT);
+switchCoach(coach).catch(e=>{$('load').textContent='Could not load coach: '+e; window.__err=String(e);});
+if(Q.has('pose')){ /* debug: freeze a clip at a time */ }
+</script>
+</body>
+</html>
